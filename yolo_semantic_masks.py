@@ -1,26 +1,4 @@
-"""
-Run YOLO segmentation on CARLA/RaDelft camera frames and save class-id masks.
-
-This is the missing stage before semantic point-cloud filtering:
-
-    radelf_spherical/
-        camera_rgb/*.png or *.jpg
-        lidar_spher/*.npy
-        radar_spher/*.npy
-
-becomes:
-
-    yolo_segmented/
-        mask_raw/*.png      # one-channel class IDs matching segment3.py
-        mask_color/*.png
-        overlay/*.png
-        debug/*_segments.txt
-        hist/*.csv
-
-The script uses Ultralytics YOLO segmentation models. Pass your YOLO26 model
-checkpoint with --model if you have one; otherwise any Ultralytics segmentation
-checkpoint path/name that exposes masks will work.
-"""
+#Run YOLO segmentation on CARLA/RaDelft camera frames and save class-id masks.
 
 from __future__ import annotations
 
