@@ -1,0 +1,15 @@
+# Start CARLA server first (separate terminal)
+./CarlaUE4.sh -carla-port=2002
+
+# Then run the closed-loop experiment
+cd radar_pipeline
+python3 closed_loop_runner.py \
+    --ckpt /path/to/your_checkpoint.ckpt \
+    --frames 500 \
+    --out-dir ./cl_run1 \
+    --device cuda
+
+
+python3 benchmark_closed_loop.py \
+    --csv ./cl_run1/closed_loop_metrics.csv \
+    --out-dir ./cl_run1/plots
