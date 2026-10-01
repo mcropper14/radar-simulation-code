@@ -1,0 +1,21 @@
+For running the delft model: ``` cd radar_code ``` 
+
+Activate venv: ``` source delft/bin/activate ``` 
+
+If buffer error: ``` if buffer error: export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python ``` 
+
+For carla sim: 
+New terminal: cd: ``` PythonAPI/carla/dist ``` 
+
+Run: ``` export PYTHONPATH=~/PythonAPI/carla/dist/carla-0.9.15-py3.7-linux-x86_64.egg ``` 
+
+Verify:  ``` python3 -c "import carla; print(carla.Transform)" ```
+
+activate env: ``` pyenv activate carla09-py37 ```
+
+run: ``` python3 new_delft2.py --record --visualize --viz-every 30 --frames 2000 --out-dir ./test_lidar_images2 ``` 
+
+
+start carla in terminal (headless): ``` ./CarlaUE4.sh /Game/Maps/Town01 -carla-server -benchmark -fps=20 -windowed -ResX=1000 -ResY=1000 ```
+
+`` ./CarlaUE4.sh /Game/Maps/Town04 -RenderOffScreen -nosound -world-port=2002``

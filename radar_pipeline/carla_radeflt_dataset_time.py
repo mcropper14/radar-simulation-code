@@ -135,14 +135,17 @@ class CarlaRADCUBE_DATASET_TIME(Dataset):
     where T = seq_len.
     """
 
-    def __init__(self, root, params=None, mode="train", seq_len=3):
+    def __init__(
+        self, root, params=None, mode="train", seq_len=3,
+        radar_subdir="radar_spher",
+    ):
         super().__init__()
         self.root = root
         self.params = params if params is not None else get_default_params()
         self.seq_len = seq_len
 
         self.lidar_dir = os.path.join(root, "lidar_spher")
-        self.radar_dir = os.path.join(root, "radar_spher")
+        self.radar_dir = os.path.join(root, radar_subdir)
 
         lidar_files = sorted(glob.glob(os.path.join(self.lidar_dir, "*.npy")))
         radar_files = sorted(glob.glob(os.path.join(self.radar_dir, "*.npy")))

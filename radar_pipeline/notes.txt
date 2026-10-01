@@ -1,7 +1,43 @@
-# Start CARLA server first (separate terminal)
-./CarlaUE4.sh -carla-port=2002
+# Start CARLA server first (separate terminal).  The collector connects to
+# 127.0.0.1:2002.  The collector loads Town04 by default; pass --town Town01
+# below if Town01 is desired.
+/CarlaUE4.sh -carla-port=2002 -carla-server -benchmark -fps=20 -windowed -ResX=1000 -ResY=1000
 
-# Then run the closed-loop experiment
+# Collect native CARLA radar (3D baseline), LiDAR ground truth, and camera.
+cd /home/dvij/Documents/radar-simulation-code/radar_pipeline
+python3 new_delft2.py --record --visualize --viz-every 30 --frames 2000 \
+    --out-dir ./test_lidar_images2 --town Town01
+
+# To also write modified/noisy 4D radar, create a JSON config such as:
+# {"range_noise_std_m": 0.05, "azimuth_noise_std_rad": 0.005,
+#  "elevation_noise_std_rad": 0.005, "doppler_noise_std_mps": 0.25,
+#  "detection_probability_at_zero_m": 0.98,
+#  "detection_probability_at_max_range": 0.65,
+#  "detection_probability_range_m": 100.0,
+#  "clutter_per_detection": 0.05, "multipath_probability": 0.02,
+#  "seed": 7}
+python3 new_delft2.py --record --visualize --viz-every 30 --frames 2000 \
+    --out-dir ./test_lidar_images2 --town Town01 \
+    --physics-config ./radar_physics.json
+
+# Compare occupancy metrics for the native 3D and modified 4D streams.
+python3 carla_3d_radar_pd_pfa.py --root ./test_lidar_images2/radelf_spherical \
+    --split all --radar-subdir radar_spher --csv ./native_3d.csv
+python3 carla_3d_radar_pd_pfa.py --root ./test_lidar_images2/radelf_spherical \
+    --split all --radar-subdir radar_4d_spher --csv ./modified_4d.csv
+
+# Train/evaluate a learned Doppler-free 3D-radar model.
+python3 network_3d_radar.py --train \
+    --root ./test_lidar_images2/radelf_spherical \
+    --radar-subdir radar_spher \
+    --checkpoint-dir ./checkpoints_3d
+python3 network_3d_radar.py --evaluate \
+    --root ./test_lidar_images2/radelf_spherical \
+    --radar-subdir radar_spher \
+    --checkpoint ./checkpoints_3d/last.ckpt \
+    --csv ./learned_3d_metrics.csv
+
+# Then run the closed-loop experiment (requires a trained checkpoint).
 cd radar_pipeline
 python3 closed_loop_runner.py \
     --ckpt /path/to/your_checkpoint.ckpt \

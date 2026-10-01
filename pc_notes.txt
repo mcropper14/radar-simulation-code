@@ -1,0 +1,105 @@
+cd CarlaSimulator
+
+cd radar_code, run: source delft/bin/activate
+
+if buffer error: export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
+
+I do not think I am using carla_preprocess_radelft. 
+
+GT sparsity 0.222% positives
+
+Changes:
+- had to fix radians vs degrees 
+
+(B, 2, D, R, A)
+changed to (T,2,D,R,A)
+
+
+delfta_preprocess for data collection - deactivate python env
+
+./CarlaUE4.sh /Game/Maps/Town01 -carla-server -benchmark -fps=20 -windowed -ResX=1000 -ResY=1000
+
+
+run network_time.py for backbone 
+
+nohup python3 network_time.py > gt_train.log 2>&1 &
+
+val loss does not seem to be improving after 3 epochs 
+
+run training: nohup python3 network_time_new_loss.py  > output2.log 2>&1 &
+
+network_time_new_loss includes a modified loss function, network_time still achieves more 
+accurate results
+
+carla_roc.py is used for eval at a threshold at 0.55
+
+
+
+
+Spectrum learning based approach:
+
+test_spec.py computes the pd/carla_preprocess_radelft
+train_spectrum is training a small regression net (ResNet101 modified for 1-channel) to predict the target spectrum from radar spectrum.
+
+nohup python3 preprocess_spectrum_radar_camera.py > preprospec.log 2>&1 &
+
+check preprospec log 
+
+look at the scales 
+
+test_mae.py - test spawning directly
+
+
+(carla09-py37) dvij@dvij-MS-7994:~/PythonAPI/carla/dist$ export PYTHONPATH=~/PythonAPI/carla/dist/carla-0.9.15-py3.7-linux-x86_64.egg
+(carla09-py37) dvij@dvij-MS-7994:~/PythonAPI/carla/dist$ python3 -c "import carla; print(carla.Transform)"
+<class 'carla.libcarla.Transform'>
+
+Used carla 0.9 and baseline_pt.py 
+
+activate env: pyenv activate carla09-py37
+
+deactivate env: pyenv deactivate
+
+
+new_data.log
+
+test_vis2.py
+
+clean this up
+
+ucd/bcd? 
+
+results stored in gf_results.log 
+
+
+gf_debug_gpu3.log
+
+nohup python3 newtwork_time.py > fixed_lidar.log 2>&1 &
+
+
+
+fixed_lidar_results2.log
+
+updated data collection: new_delft2.py
+
+python3 new_delft2.py --record --visualize --viz-every 30 --frames 2000 --out-dir ./test_lidar_images2
+
+new directory of data test_lidar_images2
+
+
+nohup python3 carla_Roc5.py > more_data.log 2>&1 &
+
+
+
+
+
+Town05 - 15k (40gb)
+
+Town04 - 15k (40gb)
+
+Town01 - 2k (5gb)
+
+test_lidar_images2 - (Town 2) 20k (50gb)
+
+
+segmentation built into carla: segment_instance.py

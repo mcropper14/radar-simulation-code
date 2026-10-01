@@ -1,0 +1,17 @@
+``` python3 radar_pipeline/network_3d_radar.py \
+    --train \
+    --root ./test_lidar_images2/radelf_spherical \
+    --radar-subdir radar_spher \
+    --checkpoint-dir ./checkpoints_3d_native \
+    --epochs 20 \
+    --batch-size 1 \
+    --workers 2
+```
+
+eval 3d radar: ``` python3 radar_pipeline/network_3d_radar.py \
+    --evaluate \
+    --root ./test_lidar_images2_4d/radelf_spherical \
+    --radar-subdir radar_4d_spher \
+    --checkpoint ./checkpoints_3d_modified/last.ckpt \
+    --threshold 0.5 \
+    --csv ./learned_3d_modified_metrics.csv ```

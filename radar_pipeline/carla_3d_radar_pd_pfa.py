@@ -91,9 +91,11 @@ def pd_pfa(target: np.ndarray, prediction: np.ndarray) -> Tuple[float, float]:
     )
 
 
-def split_files(root: str, split: str) -> Iterable[Tuple[str, str]]:
+def split_files(
+    root: str, split: str, radar_subdir: str = "radar_spher"
+) -> Iterable[Tuple[str, str]]:
     """Yield matching radar/LiDAR files for the requested temporal split."""
-    radar_dir = os.path.join(root, "radar_spher")
+    radar_dir = os.path.join(root, radar_subdir)
     lidar_dir = os.path.join(root, "lidar_spher")
     radar = {os.path.basename(path): path
              for path in glob(os.path.join(radar_dir, "*.npy"))}
@@ -117,9 +119,10 @@ def evaluate(
     max_files: Optional[int],
     export_dir: Optional[str],
     physics_config: Optional[RadarPhysicsConfig] = None,
+    radar_subdir: str = "radar_spher",
 ) -> Dict[str, float]:
     """Evaluate native radar occupancy and optionally export baseline masks."""
-    files = list(split_files(root, split))
+    files = list(split_files(root, split, radar_subdir))
     if max_files is not None:
         files = files[:max_files]
     if not files:
@@ -198,6 +201,11 @@ def main():
     parser.add_argument("--min-points", type=int, default=1,
                         help="Minimum detections per range/azimuth cell.")
     parser.add_argument("--max-files", type=int, default=None)
+    parser.add_argument(
+        "--radar-subdir",
+        default="radar_spher",
+        help="Radar directory under ROOT (use radar_4d_spher for modified 4D data).",
+    )
     parser.add_argument("--export-dir", default=None,
                         help="Optional directory for 3D radar/target RA masks.")
     parser.add_argument("--csv", default=None,
@@ -225,8 +233,9 @@ def main():
         max_files=args.max_files,
         export_dir=args.export_dir,
         physics_config=physics_config,
+        radar_subdir=args.radar_subdir,
     )
-    print(f"Native CARLA 3D radar ({args.split})")
+    print(f"CARLA radar occupancy ({args.radar_subdir}, {args.split})")
     print(f"  Frames : {int(summary['frames'])}")
     print(f"  Pd     : {summary['pd_mean']:.6f} +/- {summary['pd_std']:.6f}")
     print(f"  Pfa    : {summary['pfa_mean']:.6f} +/- {summary['pfa_std']:.6f}")

@@ -1,7 +1,8 @@
 """
 Outputs:
   <out-dir>/radelf_spherical/lidar_spher/<timestamp>.npy
-  <out-dir>/radelf_spherical/radar_spher/<timestamp>.npy
+  <out-dir>/radelf_spherical/radar_spher/<timestamp>.npy (native CARLA radar)
+  <out-dir>/radelf_spherical/radar_4d_spher/<timestamp>.npy (optional modified radar)
   <out-dir>/radelf_spherical/camera_rgb/<timestamp>.png
   <out-dir>/overlay_frames/overlay_<frame>.png (if --visualize)
   <out-dir>/coverage_diagnostics.txt (real-time coverage stats)
@@ -18,6 +19,7 @@ Usage:
 
 import os
 import csv
+import json
 import math
 import random
 import argparse
@@ -29,6 +31,11 @@ from glob import glob
 import numpy as np
 import cv2
 
+try:
+    from radar_pipeline.radar_physics import RadarPhysicsConfig, apply_radar_physics
+except ModuleNotFoundError:
+    from radar_physics import RadarPhysicsConfig, apply_radar_physics
+
 
 import matplotlib
 matplotlib.use("Agg")
@@ -37,7 +44,7 @@ import matplotlib.pyplot as plt
 CARLA_AVAILABLE = False
 try:
     import carla
-    CARLA_AVAILABLE = True
+    CARLA_AVAILABLE = hasattr(carla, "Client")
 except ImportError:
     pass
 
@@ -311,6 +318,7 @@ def save_spherical_frame(
     t_now: float,
     lidar_cloud_ego: np.ndarray,
     radar_pts_ego: np.ndarray,
+    radar_doppler: Optional[np.ndarray],
     rgb_image: np.ndarray,
     ego_pos: np.ndarray,
     ego_yaw: float,
@@ -336,17 +344,19 @@ def save_spherical_frame(
 
     #radar
     if radar_pts_ego is not None and radar_pts_ego.size:
-        R_e2w = R_ego_to_world(ego_yaw)
-        radar_pts_world = (R_e2w @ radar_pts_ego.T).T
-
-        norms = np.linalg.norm(radar_pts_world, axis=1, keepdims=True)
-        norms = np.maximum(norms, 1e-6)
-        u_r = radar_pts_world / norms
-
-        v_rel_world = -ego_vel_world[None, :]
-        doppler_vals = np.sum(v_rel_world * u_r, axis=1)
-
         sph_radar = cartesian_to_spherical_xyz(radar_pts_ego)
+        if radar_doppler is None:
+            R_e2w = R_ego_to_world(ego_yaw)
+            radar_pts_world = (R_e2w @ radar_pts_ego.T).T
+            norms = np.linalg.norm(radar_pts_world, axis=1, keepdims=True)
+            norms = np.maximum(norms, 1e-6)
+            u_r = radar_pts_world / norms
+            v_rel_world = -ego_vel_world[None, :]
+            doppler_vals = np.sum(v_rel_world * u_r, axis=1)
+        else:
+            doppler_vals = np.asarray(radar_doppler, dtype=np.float32)
+            if len(doppler_vals) != len(radar_pts_ego):
+                raise ValueError("Radar Doppler count must match radar point count")
         doppler_radar = doppler_vals.astype(np.float32)[:, None]
         radar_out = np.concatenate([sph_radar.astype(np.float32), doppler_radar], axis=1)
         np.save(os.path.join(save_radar_dir, fname), radar_out)
@@ -447,7 +457,16 @@ def spawn_traffic(world: "carla.World", bp_lib: "carla.BlueprintLibrary", num_ve
 
 
 
-def run_collection(out_dir: str, num_frames: int, record: bool, visualize: bool, viz_every: int, spawn_index: int):
+def run_collection(
+    out_dir: str,
+    num_frames: int,
+    record: bool,
+    visualize: bool,
+    viz_every: int,
+    spawn_index: int,
+    physics_config: Optional[RadarPhysicsConfig] = None,
+    town_name: str = TOWN_NAME,
+):
     """Main data collection function."""
     
     if not CARLA_AVAILABLE:
@@ -459,13 +478,18 @@ def run_collection(out_dir: str, num_frames: int, record: bool, visualize: bool,
         save_root_spher = os.path.join(out_dir, "radelf_spherical")
         save_lidar_dir = os.path.join(save_root_spher, "lidar_spher")
         save_radar_dir = os.path.join(save_root_spher, "radar_spher")
+        save_radar_4d_dir = os.path.join(save_root_spher, "radar_4d_spher")
         save_camera_dir = os.path.join(save_root_spher, "camera_rgb")
         os.makedirs(save_lidar_dir, exist_ok=True)
         os.makedirs(save_radar_dir, exist_ok=True)
+        if physics_config is not None:
+            os.makedirs(save_radar_4d_dir, exist_ok=True)
         os.makedirs(save_camera_dir, exist_ok=True)
         print(f" Recording enabled:")
         print(f"  LiDAR  {save_lidar_dir}")
         print(f"  Radar  {save_radar_dir}")
+        if physics_config is not None:
+            print(f"  4D radar {save_radar_4d_dir}")
         print(f"  Camera  {save_camera_dir}")
     
     if visualize:
@@ -482,9 +506,13 @@ def run_collection(out_dir: str, num_frames: int, record: bool, visualize: bool,
 
     client = carla.Client(HOST, PORT)
     client.set_timeout(TIMEOUT_S)
+    radar_physics_rng = (
+        np.random.default_rng(physics_config.seed)
+        if physics_config is not None else None
+    )
     
-    print(f" Loading world: {TOWN_NAME}")
-    world = client.load_world(TOWN_NAME)
+    print(f" Loading world: {town_name}")
+    world = client.load_world(town_name)
     bp_lib = world.get_blueprint_library()
     old_settings = world.get_settings()
 
@@ -622,6 +650,10 @@ def run_collection(out_dir: str, num_frames: int, record: bool, visualize: bool,
 
             lidar_sensor = buf.lidar_pts_sensor if buf.lidar_pts_sensor is not None else np.empty((0, 3), dtype=np.float32)
             radar_raw = buf.radar_pts_sensor if buf.radar_pts_sensor is not None else np.empty((0, 4), dtype=np.float32)
+            radar_raw_4d = (
+                apply_radar_physics(radar_raw, physics_config, radar_physics_rng)
+                if physics_config is not None else radar_raw
+            )
 
             lidar_world = transform_points_sensor_to_world(lidar.get_transform(), lidar_sensor)
             lidar_ego = world_points_to_ego(ego_tf_now, lidar_world)
@@ -629,6 +661,14 @@ def run_collection(out_dir: str, num_frames: int, record: bool, visualize: bool,
             radar_xyz_sensor = radar_spherical_to_xyz(radar_raw[:, :3]) if len(radar_raw) else np.empty((0, 3), dtype=np.float32)
             radar_world = transform_points_sensor_to_world(radar.get_transform(), radar_xyz_sensor)
             radar_ego = world_points_to_ego(ego_tf_now, radar_world)
+            radar_xyz_sensor_4d = (
+                radar_spherical_to_xyz(radar_raw_4d[:, :3])
+                if len(radar_raw_4d) else np.empty((0, 3), dtype=np.float32)
+            )
+            radar_world_4d = transform_points_sensor_to_world(
+                radar.get_transform(), radar_xyz_sensor_4d
+            )
+            radar_ego_4d = world_points_to_ego(ego_tf_now, radar_world_4d)
 
             #test
             if DIAGNOSTIC_COVERAGE_CHECK and coverage_log is not None and len(lidar_ego) > 0:
@@ -653,12 +693,28 @@ def run_collection(out_dir: str, num_frames: int, record: bool, visualize: bool,
                     t_now,
                     lidar_ego,
                     radar_ego,
+                    radar_raw[:, 3],
                     rgb_img,
                     ego_pos,
                     ego_yaw,
                     last_ego_pos,
                     last_time
                 )
+                if physics_config is not None:
+                    save_spherical_frame(
+                        save_lidar_dir,
+                        save_radar_4d_dir,
+                        save_camera_dir,
+                        t_now,
+                        np.empty((0, 3), dtype=np.float32),
+                        radar_ego_4d,
+                        radar_raw_4d[:, 3],
+                        None,
+                        ego_pos,
+                        ego_yaw,
+                        last_ego_pos,
+                        last_time,
+                    )
                 frames_recorded += 1
 
             if visualize and (frame % viz_every == 0):
@@ -989,6 +1045,22 @@ Examples:
                        help="Save visualization every N frames (default: 30)")
     parser.add_argument("--spawn-index", type=int, default=0, 
                        help="Spawn point index for ego vehicle (default: 0)")
+    parser.add_argument(
+        "--town",
+        type=str,
+        default=TOWN_NAME,
+        help=f"CARLA map to load (default: {TOWN_NAME})",
+    )
+    parser.add_argument(
+        "--physics-config",
+        type=str,
+        default=None,
+        metavar="JSON",
+        help=(
+            "JSON file of RadarPhysicsConfig fields. Native radar remains in "
+            "radar_spher; modified output is written to radar_4d_spher."
+        ),
+    )
     
     # Analysis options
     parser.add_argument("--max-files", type=int, default=50, 
@@ -1003,6 +1075,13 @@ Examples:
         print("="*60)
         run_analysis(args.analyze, args.max_files)
     else:
+        physics_config = None
+        if args.physics_config:
+            with open(args.physics_config, encoding="utf-8") as config_file:
+                config_values = json.load(config_file)
+            config_values["enabled"] = True
+            physics_config = RadarPhysicsConfig(**config_values)
+
         # Collection mode
         if not args.record and not args.visualize:
             print("  WARNING: Neither --record nor --visualize enabled.")
@@ -1018,7 +1097,9 @@ Examples:
             record=args.record,
             visualize=args.visualize,
             viz_every=args.viz_every,
-            spawn_index=args.spawn_index
+            spawn_index=args.spawn_index,
+            physics_config=physics_config,
+            town_name=args.town,
         )
 
 
