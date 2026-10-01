@@ -15,9 +15,9 @@ Architecture:
     CARLA radar sensor
         → raw_radar_to_cube()          # ego-motion Doppler, spherical binning
         → deque(maxlen=3)              # rolling temporal buffer
-        → NeuralNetworkRadarDetector   # (1,3,2,D,R,A) → (1,3,34,512,256)
+        → NeuralNetworkRadarDetector   # (1,3,2,D,R,A) to (1,3,34,512,256)
         → sigmoid + crop + threshold   # 0.55
-        → decode_detections()          # voxels → Cartesian XYZ + velocity
+        → decode_detections()          # voxels to Cartesian XYZ + velocity
         → acc_controller()             # proportional brake / cruise
         → ego.apply_control()          # closed loop
         → metrics logger               # CSV per tick
@@ -103,7 +103,6 @@ COLD_START_FRAMES = SEQ_LEN - 1   # 2 frames of default cruise before first infe
 
 # Detection threshold (match RaDelft convention)
 DETECTION_THRESHOLD = 0.55
-
 
 # ---------------------------------------------------------------------------
 # Sensor buffer

@@ -16,6 +16,51 @@ from network_time import NeuralNetworkRadarDetector, IN_CHANNELS, OUT_CLASSES
 
 
 
+def remove_doppler_information(radar_cube):
+    """Collapse Doppler while preserving range/azimuth occupancy.
+
+    The dataset stores detections along the velocity axis.  Moving all
+    occupied bins to the zero-velocity bin creates a fair ablation: the
+    network receives the same spatial detections and elevation feature, but
+    cannot use velocity separation or velocity history.
+    """
+    if radar_cube.ndim != 6:
+        raise ValueError(
+            f"Expected radar cube with shape (B,T,C,D,R,A), got {radar_cube.shape}"
+        )
+
+    ablated = torch.zeros_like(radar_cube)
+    occupancy = radar_cube[:, :, 0].amax(dim=2)
+    occupied_count = radar_cube[:, :, 0].sum(dim=2).clamp_min(1.0)
+    elevation_sum = radar_cube[:, :, 1].sum(dim=2)
+    zero_velocity = radar_cube.shape[3] // 2
+    ablated[:, :, 0, zero_velocity] = occupancy
+    ablated[:, :, 1, zero_velocity] = elevation_sum / occupied_count
+    return ablated
+
+
+def _mean_metric(values):
+    return float(np.mean(values)) if values else 0.0
+
+
+def _print_doppler_comparison(
+        full_pd, full_pfa, no_doppler_pd, no_doppler_pfa, threshold):
+    full_pd_mean = _mean_metric(full_pd)
+    full_pfa_mean = _mean_metric(full_pfa)
+    no_doppler_pd_mean = _mean_metric(no_doppler_pd)
+    no_doppler_pfa_mean = _mean_metric(no_doppler_pfa)
+    print(
+        f"[Doppler comparison @ thr={threshold:.4f}] "
+        f"full 4D: Pd={full_pd_mean:.4f}, Pfa={full_pfa_mean:.6f}; "
+        f"no Doppler: Pd={no_doppler_pd_mean:.4f}, "
+        f"Pfa={no_doppler_pfa_mean:.6f}; "
+        f"delta Pd={full_pd_mean - no_doppler_pd_mean:+.4f}, "
+        f"delta Pfa={full_pfa_mean - no_doppler_pfa_mean:+.6f}"
+    )
+
+
+
+
 def compute_metrics_time_carla(
         ckpt_path,
         root="radelf_spherical_ns",
@@ -27,6 +72,8 @@ def compute_metrics_time_carla(
         quantile=0.75,
         max_scores_per_batch=200_000,
         roc_save_path="roc_carla_time_ns.png",
+        evaluate_doppler_ablation=False,
+        doppler_roc_save_path="roc_carla_doppler_comparison.png",
 ):
 
 
@@ -170,6 +217,12 @@ def compute_metrics_time_carla(
     roc_thresholds = np.linspace(0.0, 1.0, 101) 
     roc_pd = {thr: [] for thr in roc_thresholds}
     roc_pfa = {thr: [] for thr in roc_thresholds}
+    if evaluate_doppler_ablation:
+        no_doppler_metrics = {
+            thr: {"pd": [], "pfa": []} for thr in summary_thresholds
+        }
+        no_doppler_roc_pd = {thr: [] for thr in roc_thresholds}
+        no_doppler_roc_pfa = {thr: [] for thr in roc_thresholds}
 
     first_batch_debugged = False
 
@@ -204,6 +257,12 @@ def compute_metrics_time_carla(
             pred_scores = pred_np_full.max(axis=2)
             gt_bin      = gt_bin_elev.max(axis=2)
 
+            if evaluate_doppler_ablation:
+                no_doppler_input = remove_doppler_information(RAD_cube)
+                no_doppler_pred = torch.sigmoid(model(no_doppler_input))
+                no_doppler_pred = crop_pred_to_label_region(no_doppler_pred)
+                no_doppler_scores = no_doppler_pred.max(dim=2).values.cpu().numpy()
+
             # Debug only for first batch of second pass
             if not first_batch_debugged:
                 print("==== METRICS DEBUG FIRST TEST BATCH ====")
@@ -232,6 +291,22 @@ def compute_metrics_time_carla(
                 pd, pfa = compute_pd_pfa(gt_bin, pred_bin)
                 roc_pd[thr].append(pd)
                 roc_pfa[thr].append(pfa)
+                if evaluate_doppler_ablation:
+                    no_doppler_bin = (no_doppler_scores >= thr).astype(np.uint8)
+                    no_doppler_pd, no_doppler_pfa = compute_pd_pfa(
+                        gt_bin, no_doppler_bin
+                    )
+                    no_doppler_roc_pd[thr].append(no_doppler_pd)
+                    no_doppler_roc_pfa[thr].append(no_doppler_pfa)
+
+            if evaluate_doppler_ablation:
+                for thr in summary_thresholds:
+                    no_doppler_bin = (no_doppler_scores >= thr).astype(np.uint8)
+                    no_doppler_pd, no_doppler_pfa = compute_pd_pfa(
+                        gt_bin, no_doppler_bin
+                    )
+                    no_doppler_metrics[thr]["pd"].append(no_doppler_pd)
+                    no_doppler_metrics[thr]["pfa"].append(no_doppler_pfa)
 
     # ---------------------------
     # 3) Aggregate & print summary thresholds
@@ -269,13 +344,45 @@ def compute_metrics_time_carla(
     idx = int(np.argmin(np.abs(roc_thresholds - desired_thr)))
     print(f"[At thr={roc_thresholds[idx]:.2f}] Pd={roc_pd_mean[idx]:.4f}, Pfa={roc_pfa_mean[idx]:.6f}")
 
+    no_doppler_roc_pd_mean = None
+    no_doppler_roc_pfa_mean = None
+    if evaluate_doppler_ablation:
+        no_doppler_roc_pd_mean = np.array([
+            _mean_metric(no_doppler_roc_pd[thr]) for thr in roc_thresholds
+        ])
+        no_doppler_roc_pfa_mean = np.array([
+            _mean_metric(no_doppler_roc_pfa[thr]) for thr in roc_thresholds
+        ])
+        _print_doppler_comparison(
+            metrics[roc_thresholds[idx]]["pd"],
+            metrics[roc_thresholds[idx]]["pfa"],
+            no_doppler_metrics[roc_thresholds[idx]]["pd"],
+            no_doppler_metrics[roc_thresholds[idx]]["pfa"],
+            roc_thresholds[idx],
+        )
+        print("[Doppler ablation at summary thresholds]")
+        for thr in summary_thresholds:
+            _print_doppler_comparison(
+                metrics[thr]["pd"], metrics[thr]["pfa"],
+                no_doppler_metrics[thr]["pd"],
+                no_doppler_metrics[thr]["pfa"],
+                thr,
+            )
+
 
     # ---------------------------
     # 5) Plot ROC curve
     # ---------------------------
     plt.figure(figsize=(7, 6))
-    plt.plot(roc_pfa_mean, roc_pd_mean, marker=None)
+    plt.plot(roc_pfa_mean, roc_pd_mean, marker=None, label="Full 4D radar")
     plt.scatter(roc_pfa_mean, roc_pd_mean, s=5)
+    if evaluate_doppler_ablation:
+        plt.plot(
+            no_doppler_roc_pfa_mean,
+            no_doppler_roc_pd_mean,
+            linestyle="--",
+            label="Doppler ablated",
+        )
 
 
     summary_pfa = []
@@ -298,14 +405,20 @@ def compute_metrics_time_carla(
 
     plt.xlabel("Pfa")
     plt.ylabel("Pd")
-    plt.title("ROC Curve")
+    plt.title("ROC Curve: full 4D vs Doppler ablation"
+              if evaluate_doppler_ablation else "ROC Curve")
     plt.grid(True)
     plt.legend()
     plt.tight_layout()
 
-    if roc_save_path is not None:
-        plt.savefig(roc_save_path, dpi=200)
-        print(f"[ROC] saved ROC curve to {roc_save_path}")
+    output_path = (
+        doppler_roc_save_path
+        if evaluate_doppler_ablation
+        else roc_save_path
+    )
+    if output_path is not None:
+        plt.savefig(output_path, dpi=200)
+        print(f"[ROC] saved ROC curve to {output_path}")
 
     plt.show()
 
@@ -358,4 +471,6 @@ if __name__ == "__main__":
         params=params,
         quantile=0.75,
         roc_save_path="roc_carla_time_ns.png",
+        evaluate_doppler_ablation=True,
+        doppler_roc_save_path="roc_carla_doppler_comparison.png",
     )
