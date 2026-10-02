@@ -262,7 +262,7 @@ def main(params):
     print(f"sample RAD shape: {RAD_sample.shape}  GT shape: {GT_sample.shape}")
 
     # DataLoaders
-    num_workers = 2  #cannot increase over 2 on 1070., they used 8 in example
+    num_workers = 6  #cannot increase over 2 on 1070., they used 8 in example
     train_loader = DataLoader(
         train_dataset,
         batch_size=1,
@@ -288,7 +288,7 @@ def main(params):
     )
 
     checkpoint_callback = ModelCheckpoint(
-        dirpath="retraingf/new_scenes_md/checkpoints",
+        dirpath="retraingf/modified_4d/checkpoints",
         filename="{epoch:02d}-{val_loss:.4f}",
         monitor="val_loss",
         save_top_k=3,
@@ -327,7 +327,15 @@ def main(params):
 if __name__ == "__main__":
     params = get_default_params()
     
-    params["dataset_path"] = "test_lidar_images2/radelf_spherical"
+    params["dataset_path"] = "../test_lidar_images2_4d/radelf_spherical"
+    # params["dataset_path"] = "test_lidar_images2_4d/radelf_spherical"
+    params["radar_subdir"] = "radar_4d_spher"
     params["bev"] = False
 
     main(params)
+
+#dirpath="retraingf/modified_4d/checkpoints"
+
+# params["dataset_path"] = "test_lidar_images2_4d/radelf_spherical"
+# params["radar_subdir"] = "radar_4d_spher"
+# params["bev"] = False
