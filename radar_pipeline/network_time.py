@@ -239,6 +239,7 @@ class NeuralNetworkRadarDetector(pl.LightningModule):
 
 def main(params):
     root = params["dataset_path"]
+    radar_subdir = params.get("radar_subdir", "radar_spher")
 
     # Datasets
     train_dataset = CarlaRADCUBE_DATASET_TIME(
@@ -246,12 +247,14 @@ def main(params):
         params=params,
         mode="train",
         seq_len=3,
+        radar_subdir=radar_subdir,
     )
     val_dataset = CarlaRADCUBE_DATASET_TIME(
         root=root,
         params=params,
         mode="val",
         seq_len=3,
+        radar_subdir=radar_subdir,
     )
 
     print(f"train len = {len(train_dataset)}")
@@ -328,6 +331,7 @@ if __name__ == "__main__":
     params = get_default_params()
     
     params["dataset_path"] = "test_lidar_images2/radelf_spherical"
+    params["radar_subdir"] = "radar_spher"
     params["bev"] = False
 
     main(params)

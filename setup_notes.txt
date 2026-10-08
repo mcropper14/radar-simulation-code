@@ -18,4 +18,30 @@ run: ``` python3 new_delft2.py --record --visualize --viz-every 30 --frames 2000
 
 start carla in terminal (headless): ``` ./CarlaUE4.sh /Game/Maps/Town01 -carla-server -benchmark -fps=20 -windowed -ResX=1000 -ResY=1000 ```
 
-`` ./CarlaUE4.sh /Game/Maps/Town04 -RenderOffScreen -nosound -world-port=2002``
+
+data recording 4d: ``` 
+python3 radar_pipeline/new_delft2.py \
+    --record \
+    --visualize \
+    --viz-every 30 \
+    --frames 2000 \
+    --town Town01 \
+    --out-dir ./test_lidar_images2_4d \
+    --physics-config /tmp/radar_physics.json
+```
+
+data recording 3d: ``` 
+
+python3 radar_pipeline/new_delft2.py \
+    --record \
+    --visualize \
+    --viz-every 30 \
+    --frames 2000 \
+    --town Town02 \
+    --out-dir ./Town02_3d_radar \
+    --physics-config /tmp/radar_physics.json
+
+
+    python3 new_delft2.py --record --visualize --viz-every 30 --frames 2000 --out-dir ./test_lidar_images3
+    
+    

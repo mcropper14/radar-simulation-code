@@ -15,3 +15,7 @@ eval 3d radar: ``` python3 radar_pipeline/network_3d_radar.py \
     --checkpoint ./checkpoints_3d_modified/last.ckpt \
     --threshold 0.5 \
     --csv ./learned_3d_modified_metrics.csv ```
+
+
+./CarlaUE4.sh -carla-port=2002 -carla-server -benchmark -fps=20 \
+    -windowed -ResX=1000 -ResY=1000
