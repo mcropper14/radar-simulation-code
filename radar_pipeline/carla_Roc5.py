@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 
 from data_preparation import get_default_params  # same as RaDelft
-from compute_metrics import compute_pd_pfa
+from carla_4d_radar_pd_pfa import compute_pd_pfa
 import time
 
 
@@ -83,6 +83,7 @@ def compute_metrics_time_carla(
         params=params,
         mode="test",
         seq_len=seq_len,
+        radar_subdir=params.get("radar_subdir", "radar_4d_spher"),
     )
     test_loader = DataLoader(
         test_dataset,
@@ -427,7 +428,8 @@ def compute_metrics_time_carla(
 
 if __name__ == "__main__":
     params = get_default_params()
-    params["dataset_path"] = "radelf_spherical_pc"
+    params["dataset_path"] = "../test_lidar_images2_4d/radelf_spherical"
+    params["radar_subdir"] = "radar_4d_spher"
     params["bev"] = False
 
     #this is the best so far
@@ -459,15 +461,17 @@ if __name__ == "__main__":
 
     #ckpt_path = "retraingf/new_scenes_md/checkpoints/epoch=04-val_loss=0.0126.ckpt"
     #ckpt_path = "retraingf/new_scenes_md/checkpoints/last-v3.ckpt"
-    ckpt_path = "retraingf/new_scenes_md/checkpoints/epoch=02-val_loss=0.0468.ckpt"
+    # ckpt_path = "retraingf/new_scenes_md/checkpoints/epoch=02-val_loss=0.0468.ckpt"
+
+    ckpt_path = "retraingf/modified_4d/checkpoints/epoch=19-val_loss=0.0125.ckpt"
 
     compute_metrics_time_carla(
         ckpt_path=ckpt_path,
-        root="test_lidar_images/radelf_spherical",
+        root="../test_lidar_images2_4d/radelf_spherical",
         seq_len=3,
         batch_size=1,
         num_workers=1,
-        device="cpu", #cuda
+        device="cuda", #cuda
         params=params,
         quantile=0.75,
         roc_save_path="roc_carla_time_ns.png",

@@ -74,7 +74,7 @@ results stored in gf_results.log
 
 gf_debug_gpu3.log
 
-nohup python3 newtwork_time.py > fixed_lidar.log 2>&1 &
+nohup python3 newtwork_time.py > town02_4dradar_train.log 2>&1 &
 
 
 
