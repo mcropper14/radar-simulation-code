@@ -103,3 +103,16 @@ test_lidar_images2 - (Town 2) 20k (50gb)
 
 
 segmentation built into carla: segment_instance.py
+
+/home/dvij/CarlaUE4.sh /Game/Maps/Town01 \
+  -carla-server \
+  -benchmark \
+  -fps=20 \
+  -RenderOffScreen \
+  -nosound
+
+  ./CarlaUE4.sh /Game/Maps/Town01 -carla-server -carla-port=2002 -benchmark -fps=20 -Render
+OffScreenpython3 closed_loop_runner.py \
+  --ckpt /home/dvij/Documents/radar_code/lightning_logs6/new_scenes_md/checkpoints/epoch=00-val_loss=0.0864.ckpt \
+  --frames 500 \
+  --device cuda
