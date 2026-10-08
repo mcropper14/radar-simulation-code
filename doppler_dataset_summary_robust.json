@@ -1,0 +1,139 @@
+{
+  "dataset_root": "./test_lidar_images2_4d",
+  "split": "all",
+  "native": {
+    "frames": 2000.0,
+    "detections_mean": 17103.9925,
+    "detections_std": 2625.8966846476937,
+    "mean_ms_mean": -0.6043968573279789,
+    "mean_ms_std": 2.0091261782706016,
+    "std_ms_mean": 0.17899996812806807,
+    "std_ms_std": 0.5215464796399909,
+    "min_ms_mean": -0.9404619297329682,
+    "min_ms_std": 2.3198947207952965,
+    "max_ms_mean": -0.3395305290271697,
+    "max_ms_std": 1.6671971195430666,
+    "approaching_fraction_mean": 0.03521289041970162,
+    "approaching_fraction_std": 0.14977485823912356,
+    "receding_fraction_mean": 0.12012950374456532,
+    "receding_fraction_std": 0.30780886635295673,
+    "near_zero_fraction_mean": 0.844657605835733,
+    "near_zero_fraction_std": 0.35455916876150106
+  },
+  "native_temporal_motion": {
+    "matches": 2968936.0,
+    "mean_native_ms": -0.5738795959781361,
+    "mean_range_rate_ms": -0.16891481163668043,
+    "native_vs_approaching_convention": {
+      "bias_ms": -0.7427944076148164,
+      "mae_ms": 0.991824096905082,
+      "rmse_ms": 2.9747090029249126,
+      "sign_agreement": 0.4324340437112824,
+      "correlation": -0.4919244898237663
+    },
+    "native_vs_receding_convention": {
+      "bias_ms": -0.4049647843414554,
+      "mae_ms": 0.49184597430766375,
+      "rmse_ms": 1.832231772224748,
+      "sign_agreement": 0.5290258867149713,
+      "correlation": 0.4919244898237663
+    }
+  },
+  "native_pd_pfa": {
+    "frames": 2000.0,
+    "pd_mean": 0.08284665256233839,
+    "pfa_mean": 0.0496212540768242,
+    "pd_std": 0.020736773583948504,
+    "pfa_std": 0.018276985327982023
+  },
+  "modified_pd_pfa": {
+    "frames": 2000.0,
+    "pd_mean": 0.04111354268098016,
+    "pfa_mean": 0.01620068178071231,
+    "pd_std": 0.015197790281543675,
+    "pfa_std": 0.013163152068391979
+  },
+  "modified": {
+    "frames": 2000.0,
+    "detections_mean": 17494.691,
+    "detections_std": 2521.8045652903,
+    "mean_ms_mean": -0.5857728111365794,
+    "mean_ms_std": 1.9574141166970338,
+    "std_ms_mean": 0.6139025051079757,
+    "std_ms_std": 0.46431449349364257,
+    "min_ms_mean": -6.34141423201561,
+    "min_ms_std": 1.1142208901920683,
+    "max_ms_mean": 6.141847494125366,
+    "max_ms_std": 0.7463447471637198,
+    "approaching_fraction_mean": 0.3288825579653446,
+    "approaching_fraction_std": 0.1299775353915002,
+    "receding_fraction_mean": 0.4130015396847293,
+    "receding_fraction_std": 0.19527566817195782,
+    "near_zero_fraction_mean": 0.25811590234992615,
+    "near_zero_fraction_std": 0.10096686433432972
+  },
+  "modified_vs_native": {
+    "matches": 2824057.0,
+    "matched_frame_count": 2000.0,
+    "mean_match_rate": 0.08287374806759158,
+    "frame_mean_delta": {
+      "frames": 2000.0,
+      "mean": 0.0021680004960828313,
+      "std": 0.009602369901815688,
+      "bootstrap_ci95_low": 0.0017559846312714701,
+      "bootstrap_ci95_high": 0.002543400617996522
+    },
+    "frame_mae": {
+      "frames": 2000.0,
+      "mean": 0.202477371103829,
+      "std": 0.00809378378318501,
+      "bootstrap_ci95_low": 0.20212446905805553,
+      "bootstrap_ci95_high": 0.20282687067486743
+    },
+    "frame_rmse": {
+      "frames": 2000.0,
+      "mean": 0.2755535653971256,
+      "std": 0.07072585258107604,
+      "bootstrap_ci95_low": 0.2726642475193362,
+      "bootstrap_ci95_high": 0.2784163278331945
+    },
+    "mean_modified_minus_native_ms": 0.0022165853352400997,
+    "mae_ms": 0.20251517042271402,
+    "rmse_ms": 0.28510209442900547,
+    "std_ms": 0.2850934776476956,
+    "p95_absolute_error_ms": 0.4921630731149315,
+    "wasserstein_velocity_distance_ms": 0.1734829616267714,
+    "range_stratified": {
+      "0_10m": {
+        "samples": 2532082.0,
+        "bias_ms": 0.00032466323608254993,
+        "mae_ms": 0.20034130064583658,
+        "rmse_ms": 0.2570306444184451
+      },
+      "10_20m": {
+        "samples": 145931.0,
+        "bias_ms": 0.016360791597457285,
+        "mae_ms": 0.2178047429606123,
+        "rmse_ms": 0.43626714862037386
+      },
+      "20_30m": {
+        "samples": 74441.0,
+        "bias_ms": 0.024681400034927546,
+        "mae_ms": 0.22538431015661442,
+        "rmse_ms": 0.5004038378465837
+      },
+      "30_40m": {
+        "samples": 41852.0,
+        "bias_ms": 0.02110486176564636,
+        "mae_ms": 0.2293914922197097,
+        "rmse_ms": 0.49936310078420904
+      },
+      "40_50m": {
+        "samples": 29751.0,
+        "bias_ms": 0.011077071113957896,
+        "mae_ms": 0.217505068966233,
+        "rmse_ms": 0.4266444985373304
+      }
+    }
+  }
+}
