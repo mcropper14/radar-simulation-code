@@ -13,7 +13,7 @@ Usage:
 
 Architecture:
     CARLA radar sensor
-        → raw_radar_to_cube()          # ego-motion Doppler, spherical binning
+        → raw_radar_to_cube()          # native relative radial velocity, binning
         → deque(maxlen=3)              # rolling temporal buffer
         → NeuralNetworkRadarDetector   # (1,3,2,D,R,A) to (1,3,34,512,256)
         → sigmoid + crop + threshold   # 0.55
@@ -123,8 +123,8 @@ def _R_ego_to_world(yaw_deg: float) -> np.ndarray:
 
 # ---------------------------------------------------------------------------
 # Step 1: raw radar → (2, D, R, A) cube
-# Reproduces save_spherical_frame's radar path exactly — ego-motion Doppler
-# projection (NOT CARLA's native .velocity) to match the training dataset.
+# Reproduces the training dataset path: CARLA's native relative radial
+# velocity is retained as the Doppler coordinate.
 # ---------------------------------------------------------------------------
 def raw_radar_to_cube(
     radar_raw: np.ndarray,          # (N, 4) [depth, azimuth, altitude, velocity_native]
@@ -138,7 +138,8 @@ def raw_radar_to_cube(
 ) -> np.ndarray:
     """
     Build a (2, D, R, A) radar cube in memory from a single tick of raw radar
-    detections. Uses ego-motion Doppler projection to match training data.
+    detections. Uses CARLA's native relative radial velocity, matching
+    the training data.
 
     Returns zeros cube if no radar points.
     """
@@ -148,35 +149,9 @@ def raw_radar_to_cube(
         A = len(params["azimuth_axis"])
         return np.zeros((2, D, R, A), dtype=np.float32)
 
-    # Ego velocity in world frame (finite difference — same as training)
-    if last_ego_pos is not None and last_time is not None:
-        dt = max(t_now - last_time, 1e-6)
-        ego_vel_world = (ego_pos - last_ego_pos) / dt
-    else:
-        ego_vel_world = np.zeros(3, np.float32)
-
-    # Doppler: project ego velocity onto each radar ray direction in world frame
-    R_e2w = _R_ego_to_world(ego_yaw)
-    radar_pts_world = (R_e2w @ radar_ego_xyz.T).T
-
-    norms = np.linalg.norm(radar_pts_world, axis=1, keepdims=True)
-    norms = np.maximum(norms, 1e-6)
-    u_r = radar_pts_world / norms
-
-    # Doppler = -ego_vel · unit_radial  (positive = approaching)
-    v_rel_world = -ego_vel_world[None, :]
-    doppler_vals = np.sum(v_rel_world * u_r, axis=1).astype(np.float32)
-
-    # Spherical coordinates from Cartesian ego-frame points
-    x = radar_ego_xyz[:, 0]
-    y = radar_ego_xyz[:, 1]
-    z = radar_ego_xyz[:, 2]
-    r = np.sqrt(x**2 + y**2 + z**2)
-    az = np.arctan2(y, x)
-    r_safe = np.maximum(r, 1e-6)
-    el = np.arcsin(np.clip(z / r_safe, -1.0, 1.0))
-
-    radar_spher = np.stack([r, az, el, doppler_vals], axis=1).astype(np.float32)
+    # CARLA's native velocity includes target and ego motion. Keep it instead
+    # of replacing it with an ego-only estimate, matching recorded training data.
+    radar_spher = radar_raw[:, :4].astype(np.float32, copy=True)
 
     # Crop to ROI and bin into cube
     radar_spher = crop_spherical_to_roi(radar_spher, params)
@@ -332,6 +307,23 @@ def radar_spherical_to_xyz(r_az_alt: np.ndarray) -> np.ndarray:
     return np.stack([x, y, z], axis=1).astype(np.float32)
 
 
+def ego_only_radial_velocity(
+    radar_ego_xyz: np.ndarray,
+    ego_yaw: float,
+    ego_velocity_world: np.ndarray,
+) -> np.ndarray:
+    """Return the ego-motion-only Doppler prediction for each radar point."""
+    if radar_ego_xyz is None or len(radar_ego_xyz) == 0:
+        return np.empty(0, dtype=np.float32)
+    rotation = _R_ego_to_world(ego_yaw)
+    points_world_relative = (rotation @ radar_ego_xyz.T).T
+    norms = np.linalg.norm(points_world_relative, axis=1, keepdims=True)
+    unit_rays = points_world_relative / np.maximum(norms, 1e-6)
+    return (-unit_rays @ np.asarray(ego_velocity_world, dtype=np.float32)).astype(
+        np.float32
+    )
+
+
 def transform_points_sensor_to_world(sensor_tf: "carla.Transform", pts: np.ndarray) -> np.ndarray:
     if pts is None or len(pts) == 0:
         return np.empty((0, 3), dtype=np.float32)
@@ -348,24 +340,30 @@ def world_points_to_ego(ego_tf: "carla.Transform", pts: np.ndarray) -> np.ndarra
     return ((inv @ pts_h.T).T)[:, :3]
 
 
-def get_actor_range_velocity(ego_tf: "carla.Transform", lead: "carla.Actor") -> Tuple[float, float]:
+def get_actor_range_velocity(
+    radar_tf: "carla.Transform",
+    sensor_velocity_world: np.ndarray,
+    lead: "carla.Actor",
+) -> Tuple[float, float]:
     """
-    Oracle: ground-truth range and closing velocity from CARLA actor transforms.
+    Oracle: ground-truth range and radial velocity from CARLA actor state.
     Used ONLY for evaluation metrics — never as controller input.
     """
     lead_loc = lead.get_location()
     lead_world = np.array([lead_loc.x, lead_loc.y, lead_loc.z], dtype=np.float32)
-    lead_ego = world_points_to_ego(ego_tf, lead_world[None, :])[0]
-    gt_range = float(np.linalg.norm(lead_ego[:2]))
+    radar_loc = radar_tf.location
+    radar_world = np.array([radar_loc.x, radar_loc.y, radar_loc.z], dtype=np.float32)
+    ray = lead_world - radar_world
+    distance = max(float(np.linalg.norm(ray)), 1e-6)
+    unit_ray = ray / distance
 
-    ego_v = ego_tf.get_forward_vector()
-    lead_v_carla = lead.get_velocity()
-    ego_speed = math.sqrt(ego_v.x**2 + ego_v.y**2)
-    lead_speed = math.sqrt(lead_v_carla.x**2 + lead_v_carla.y**2)
-    # Approximate closing velocity (positive = approaching)
-    gt_closing_vel = ego_speed - lead_speed
-
-    return gt_range, gt_closing_vel
+    lead_velocity = lead.get_velocity()
+    target_velocity_world = np.array(
+        [lead_velocity.x, lead_velocity.y, lead_velocity.z], dtype=np.float32
+    )
+    relative_velocity = np.asarray(sensor_velocity_world) - target_velocity_world
+    gt_radial_velocity = float(np.dot(relative_velocity, unit_ray))
+    return distance, gt_radial_velocity
 
 
 # ---------------------------------------------------------------------------
@@ -414,7 +412,8 @@ def run_closed_loop(
     D = params["vel_fft_size"]        # 128
     R = len(params["range_axis"])     # 500 (before padding to 512)
     A = len(params["azimuth_axis"])   # 240 (before padding to 256)
-    _dummy = torch.zeros(1, SEQ_LEN, 2, D, 512, 256, device=device)
+    # The network pads the raw 500x240 radar grid internally to 512x256.
+    _dummy = torch.zeros(1, SEQ_LEN, 2, D, R, A, device=device)
     with torch.no_grad():
         _out = model(_dummy)
     print(f"[run_closed_loop] Model sanity check passed: output shape {tuple(_out.shape)}")
@@ -432,6 +431,7 @@ def run_closed_loop(
 
     actors = []
     sensors = []
+    traffic_manager = None
 
     try:
         # Synchronous mode
@@ -517,7 +517,10 @@ def run_closed_loop(
                 "inference_ms",
                 "n_detections",
                 "detected_range_m", "detected_vel_ms",
-                "gt_range_m", "gt_closing_vel_ms",
+                "gt_range_m", "gt_radial_vel_ms",
+                "native_doppler_count", "native_doppler_mean_ms",
+                "native_doppler_std_ms", "native_doppler_min_ms",
+                "native_doppler_max_ms", "ego_only_doppler_mean_ms",
                 "throttle", "brake", "steer",
                 "ego_speed_ms",
                 "false_brake",
@@ -534,6 +537,9 @@ def run_closed_loop(
                 ego_yaw = ego_tf.rotation.yaw
                 ego_v_carla = ego.get_velocity()
                 ego_speed_ms = math.sqrt(ego_v_carla.x**2 + ego_v_carla.y**2 + ego_v_carla.z**2)
+                ego_velocity_world = np.array(
+                    [ego_v_carla.x, ego_v_carla.y, ego_v_carla.z], dtype=np.float32
+                )
 
                 # Scripted deceleration event for lead vehicle
                 if lead is not None and frame == lead_decel_frame:
@@ -551,6 +557,25 @@ def run_closed_loop(
                 else:
                     radar_ego_xyz = np.empty((0, 3), dtype=np.float32)
 
+                native_doppler = (
+                    radar_raw[:, 3].astype(np.float32, copy=False)
+                    if radar_raw is not None and len(radar_raw) > 0
+                    else np.empty(0, dtype=np.float32)
+                )
+                ego_only_doppler = ego_only_radial_velocity(
+                    radar_ego_xyz, ego_yaw, ego_velocity_world
+                )
+                if len(native_doppler):
+                    native_doppler_summary = (
+                        len(native_doppler), float(np.mean(native_doppler)),
+                        float(np.std(native_doppler)), float(np.min(native_doppler)),
+                        float(np.max(native_doppler)),
+                    )
+                    ego_only_mean = float(np.mean(ego_only_doppler))
+                else:
+                    native_doppler_summary = (0, float("nan"), float("nan"), float("nan"), float("nan"))
+                    ego_only_mean = float("nan")
+
                 cube = raw_radar_to_cube(
                     radar_raw=radar_raw,
                     radar_ego_xyz=radar_ego_xyz,
@@ -565,9 +590,11 @@ def run_closed_loop(
 
                 # ---- Oracle ground-truth (evaluation only) ----
                 gt_range_m = float("nan")
-                gt_closing_vel_ms = float("nan")
+                gt_radial_vel_ms = float("nan")
                 if lead is not None:
-                    gt_range_m, gt_closing_vel_ms = get_actor_range_velocity(ego_tf, lead)
+                    gt_range_m, gt_radial_vel_ms = get_actor_range_velocity(
+                        radar_sensor.get_transform(), ego_velocity_world, lead
+                    )
 
                 # ---- Cold-start handling ----
                 if cold_start_remaining > 0:
@@ -583,7 +610,11 @@ def run_closed_loop(
                         "nan", 0,
                         "nan", "nan",
                         f"{gt_range_m:.3f}" if not math.isnan(gt_range_m) else "nan",
-                        f"{gt_closing_vel_ms:.3f}" if not math.isnan(gt_closing_vel_ms) else "nan",
+                                                f"{gt_radial_vel_ms:.3f}" if not math.isnan(gt_radial_vel_ms) else "nan",
+                                                native_doppler_summary[0],
+                                                *(f"{value:.3f}" if not math.isnan(value) else "nan"
+                                                    for value in native_doppler_summary[1:]),
+                                                f"{ego_only_mean:.3f}" if not math.isnan(ego_only_mean) else "nan",
                         f"{control.throttle:.3f}", f"{control.brake:.3f}", f"{control.steer:.3f}",
                         f"{ego_speed_ms:.3f}",
                         0, 1,
@@ -595,20 +626,12 @@ def run_closed_loop(
                 # ---- Online inference ----
                 t_inf_start = time.perf_counter()
 
-                # Stack buffer → (1, T, 2, D, R_pad, A_pad)
+                # Stack buffer → (1, T, 2, D, R, A). The model pads the
+                # raw 500x240 grid internally to its 512x256 input size.
                 cubes_np = list(frame_buffer)
                 stacked = np.stack(cubes_np, axis=0)  # (T, 2, D, R, A)
-                # Pad R→512, A→256 (match model's padded input expectation)
-                R_raw = stacked.shape[3]
-                A_raw = stacked.shape[4]
-                R_pad = 512
-                A_pad = 256
-                pad_r = max(0, R_pad - R_raw)
-                pad_a = max(0, A_pad - A_raw)
-                if pad_r > 0 or pad_a > 0:
-                    stacked = np.pad(stacked, ((0,0),(0,0),(0,0),(0,pad_r),(0,pad_a)))
 
-                rad_tensor = torch.from_numpy(stacked).float().unsqueeze(0).to(device)  # (1,T,2,512,256)
+                rad_tensor = torch.from_numpy(stacked).float().unsqueeze(0).to(device)  # (1,T,2,500,240)
 
                 with torch.no_grad():
                     pred = model(rad_tensor)                   # (1, T, 34, 512, 256)
@@ -666,7 +689,11 @@ def run_closed_loop(
                     f"{detected_range_m:.3f}" if not math.isnan(detected_range_m) else "nan",
                     f"{detected_vel_ms:.3f}" if not math.isnan(detected_vel_ms) else "nan",
                     f"{gt_range_m:.3f}" if not math.isnan(gt_range_m) else "nan",
-                    f"{gt_closing_vel_ms:.3f}" if not math.isnan(gt_closing_vel_ms) else "nan",
+                                        f"{gt_radial_vel_ms:.3f}" if not math.isnan(gt_radial_vel_ms) else "nan",
+                                        native_doppler_summary[0],
+                                        *(f"{value:.3f}" if not math.isnan(value) else "nan"
+                                            for value in native_doppler_summary[1:]),
+                                        f"{ego_only_mean:.3f}" if not math.isnan(ego_only_mean) else "nan",
                     f"{control.throttle:.3f}", f"{control.brake:.3f}", f"{control.steer:.3f}",
                     f"{ego_speed_ms:.3f}",
                     false_brake, 0,
@@ -696,19 +723,39 @@ def run_closed_loop(
                 s.stop()
             except Exception:
                 pass
-        destroyed = set()
-        for a in reversed(actors):
+
+        # Detach Traffic Manager before destroying vehicles. Otherwise its
+        # synchronous loop can still call an actor proxy during teardown.
+        if traffic_manager is not None:
             try:
-                if a is None or a.id in destroyed:
-                    continue
-                a.destroy()
-                destroyed.add(a.id)
+                if lead is not None:
+                    lead.set_autopilot(False)
+            except Exception:
+                pass
+            try:
+                traffic_manager.set_synchronous_mode(False)
             except Exception:
                 pass
         try:
             world.apply_settings(old_settings)
         except Exception:
             pass
+
+        actor_ids = []
+        seen_ids = set()
+        for actor in actors:
+            try:
+                actor_id = actor.id
+                if actor_id not in seen_ids:
+                    actor_ids.append(actor_id)
+                    seen_ids.add(actor_id)
+            except Exception:
+                pass
+        if actor_ids:
+            try:
+                client.apply_batch([carla.command.DestroyActor(actor_id) for actor_id in actor_ids])
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------
